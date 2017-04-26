@@ -18,6 +18,8 @@ package org.jboss.weld.event;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Type;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.List;
 import java.util.Set;
 
@@ -296,7 +298,15 @@ public class ObserverMethodImpl<T, X> implements ObserverMethod<T> {
             preNotify(event, receiver);
             // As we are working with the contextual instance, we may not have the
             // actual object, but a container proxy (e.g. EJB)
-            notificationStrategy.invoke(receiver, observerMethod, event, beanManager, creationalContext);
+            ClassLoader oldCL = null;
+            try {
+                ClassLoader newCL = receiver.getClass().getClassLoader();
+                oldCL = AccessController.doPrivileged( new GetAndSetLoader(newCL));
+                notificationStrategy.invoke(receiver, observerMethod, event, beanManager, creationalContext);
+            }
+            finally {
+                AccessController.doPrivileged( new GetAndSetLoader(oldCL));
+            }
         } finally {
             postNotify(event, receiver);
         }
@@ -361,4 +371,22 @@ public class ObserverMethodImpl<T, X> implements ObserverMethod<T> {
     public boolean isEventMetadataRequired() {
         return eventMetadataRequired;
     }
+
+
+    static class GetAndSetLoader implements PrivilegedAction<ClassLoader> {
+        private ClassLoader newLoader;
+        GetAndSetLoader(ClassLoader newLoader) {
+            this.newLoader = newLoader;
+        }
+
+        @Override
+        public ClassLoader run() {
+            Thread t = Thread.currentThread();
+            ClassLoader origLoader = t.getContextClassLoader();
+            t.setContextClassLoader(newLoader);
+            return origLoader;
+        }
+}
+
+
 }
